@@ -1,38 +1,5 @@
 #Evan Burchard (evanburchard.com)
 #May, 2015
-#
-#ASSUMPTIONS
-#5 player game
-#Spies play conservatively and hide most info (might not be optimal)
-#Spies and resistance make decisions based on reputation of players
-#algorithms to decide teams (by resistance) are called "team_rejection_criteria"
-#leaders (resistance and spies) always choose themselves + highest reputation others for missions
-
-#TODO
-#more reputation factors (features)
-#build multiple rejection criteria
-#feature optimization (through multivariate linear regression?)
-
-
-#nice to have?
-#feature scaling: use -1 through 1 range for features?
-#feature scaling: mean normalization?
-
-
-#BIAS_VALUE = Random.rand(10) #starting reputation
-#SUCCESSFUL_MISSION = Random.rand(10) #feature 1
-#FAILED_MISSION = Random.rand(10) #feature 2
-#SUCCEEDED_AS_LEADER = Random.rand(10) #feature 3
-#FAILED_AS_LEADER = Random.rand(10) #feature 4
-#AVERAGE_REP_THRESHOLD = Random.rand(10) #feature 5
-#LOWEST_REP_THRESHOLD = Random.rand(10) #feature 5
-#BIAS_VALUE = 2
-#SUCCESSFUL_MISSION = 9
-#FAILED_MISSION = 2
-#SUCCEEDED_AS_LEADER = 3
-#FAILED_AS_LEADER = 6
-#AVERAGE_REP_THRESHOLD = 1
-#LOWEST_REP_THRESHOLD = 7
 
 BIAS_VALUE = 4
 SUCCESSFUL_MISSION = 8
@@ -226,9 +193,7 @@ class RejectionStrategy
       average_rep = options[:team].inject(0){|sum, n| sum + n.reputation}/options[:number_of_players]
       average_rep > AVERAGE_REP_THRESHOLD
     elsif(options[:strategy]=='low_rep_individual')
-
       min_rep = options[:team].map(&:reputation).min
-
       min_rep > LOWEST_REP_THRESHOLD
     elsif(options[:strategy]=="omnipotent")
       options[:number_of_spies]>0 #if resistance knew who spies were
