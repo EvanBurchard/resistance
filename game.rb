@@ -1,34 +1,69 @@
+#Evan Burchard (evanburchard.com)
+#May, 2015
+#
 #ASSUMPTIONS
 #5 player game
-#Spies play conservatively and hide most info
-#Resistance makes decisions based on reputation of players DECISION
+#Spies play conservatively and hide most info (might not be optimal)
+#Spies and resistance make decisions based on reputation of players
+#algorithms to decide teams (by resistance) are called "team_rejection_criteria"
+#leaders (resistance and spies) always choose themselves + highest reputation others for missions
 
 #TODO
-#leader role
-#reputations
+#more reputation factors (features)
+#build multiple rejection criteria
+#feature optimization (through multivariate linear regression?)
 
-class Evidence
-  attr_accessor :name, :weight
-  def initialize(name, weight)
-    @name = name
-    @weight = weight
-  end
-end
+
+#nice to have?
+#feature scaling: use -1 through 1 range for features?
+#feature scaling: mean normalization?
+
+
+#BIAS_VALUE = Random.rand(10) #starting reputation
+#SUCCESSFUL_MISSION = Random.rand(10) #feature 1
+#FAILED_MISSION = Random.rand(10) #feature 2
+#SUCCEEDED_AS_LEADER = Random.rand(10) #feature 3
+#FAILED_AS_LEADER = Random.rand(10) #feature 4
+#AVERAGE_REP_THRESHOLD = Random.rand(10) #feature 5
+#LOWEST_REP_THRESHOLD = Random.rand(10) #feature 5
+#BIAS_VALUE = 2
+#SUCCESSFUL_MISSION = 9
+#FAILED_MISSION = 2
+#SUCCEEDED_AS_LEADER = 3
+#FAILED_AS_LEADER = 6
+#AVERAGE_REP_THRESHOLD = 1
+#LOWEST_REP_THRESHOLD = 7
+
+BIAS_VALUE = 4
+SUCCESSFUL_MISSION = 8
+FAILED_MISSION = 7
+SUCCEEDED_AS_LEADER = 8
+FAILED_AS_LEADER = 8
+AVERAGE_REP_THRESHOLD = 6
+LOWEST_REP_THRESHOLD = 1
+
+
+NUMBER_OF_TRIALS = 1000
+
+
+NOISY = false
 
 class Game
-  attr_accessor :missions, :players, :winner, :leader_number
-  def initialize
+  attr_accessor :missions, :players, :winner, :leader_number, :spy_strategy, :team_rejection_criteria
+  def initialize(options = {spy_strategy: 'sneaky', team_rejection_criteria: 'low_rep_individual'})
     @missions = create_missions
     @players = create_players
     @winner = nil
     @leader_number = 0
+    @spy_strategy = options[:spy_strategy] #sneaky (same as resistance) or random
+    @team_rejection_criteria = options[:team_rejection_criteria]
   end
 
   def create_players
     players = []
     statuses = ["spy", "spy", "resistance", "resistance", "resistance"].shuffle
     statuses.length.times do |index|
-      players.push(Player.new(index, statuses.pop) )
+      players.push(Player.new(index, statuses.pop, self) )
     end
     players
   end
@@ -45,11 +80,11 @@ class Game
     @missions.each do |mission|
       mission.print
     end
-    puts ""
+    puts "" if NOISY
     @players.each do |player|
       player.print
     end
-    puts ""
+    puts "" if NOISY
   end
 
   def next_mission
@@ -72,11 +107,10 @@ class Game
 
     not_started = not_started_missions_count
 
-    puts "leader is Player #{@leader_number}"
-    puts "#{not_started} missions left to go."
-    puts "#{failed} failed missions so far."
-    puts "#{successful} successful missions so far."
-    puts "\n"
+    puts "#{not_started} missions left to go." if NOISY
+    puts "#{failed} failed missions so far." if NOISY
+    puts "#{successful} successful missions so far." if NOISY
+    puts "\n" if NOISY
   end
 
   def start_mission
@@ -97,12 +131,12 @@ class Game
   end
 
   def final_report
-    puts "\nThe #{@winner} with #{not_started_missions_count} rounds to go!"
-    puts "#{spies[0].name} and #{spies[1].name} were spies\n\n"
+    puts "\nThe #{@winner} with #{not_started_missions_count} rounds to go!" if NOISY
+    puts "#{spies[0].name} and #{spies[1].name} were spies\n\n" if NOISY
   end
 
   def short_report
-    puts "#{@winner[0]}"
+    puts "#{@winner[0]}" if NOISY
   end
 
   def number_of_players
@@ -114,43 +148,91 @@ class Game
     @leader_number %= number_of_players
   end
 
+  def leader
+    @players.find{|p| p.number == @leader_number}
+  end
+
+  def average_reputation
+    @players.inject{|sum, n| sum + n.reputation}/number_of_players
+  end
+
 end
 
+
 class MissionTeam
-  attr_accessor :mission, :leader, :game, :team, :mission_team_approved
+  attr_accessor :mission, :game, :team, :mission_team_approved
   def initialize(mission, game)
     @game = game
     @mission = mission
     @team = choose_team
     @mission_team_approved = vote_on_team
   end
+
   def choose_team #DECISION
-    puts "team size is #{@mission.team_size}"
-    team = []
-    temp_players_array = @game.players
-    @mission.team_size.times do
-      team.push(temp_players_array.shuffle.pop)
+    puts "leader is Player #{game.leader_number}" if NOISY
+    puts "team size is #{@mission.team_size}" if NOISY
+    puts "leader is spy #{game.leader.is_spy?}" if NOISY
+
+    team = [game.leader]
+    temp_players_array = @game.players - [game.leader]
+
+    sorted_temp_players_array = temp_players_array.sort_by{ |player| player.reputation}
+    puts "Temp player array is #{sorted_temp_players_array}" if NOISY
+
+    (@mission.team_size-1).times do
+
+      if(game.spy_strategy = "random") #spies choose non-selves at random
+        if(game.leader.status =="spy")
+          team.push(sorted_temp_players_array.shuffle.pop) #do it at random
+        else
+          team.push(sorted_temp_players_array.pop) #take the most trusted
+        end
+      else #everyone chooses the most trusted
+        team.push(sorted_temp_players_array.pop) #take the most trusted
+      end
     end
+
     team
   end
+
   def vote_on_team #DECISION
     number_of_spies = @team.count{|m| m.status == "spy" }
-    #puts "Team size is #{@team.count}"
+    #puts "Team size is #{@team.count}" if NOISY
     doubt = 0
     game.players.each do |p|
-      if p.is_spy #the spies know who the spies are
+      if p.is_spy? #the spies know who the spies are
         if(number_of_spies == 0 && @game.successful_missions_count > 1)
           doubt= doubt + 1
         elsif (@mission.vote_fail_count == 4 && @game.failed_missions_count > 1) #win if possible
-          doubt= doubt + 1
-        end
-      else
-        if(number_of_spies>0)
           doubt = doubt + 1
+        end
+      elsif p.is_leader?
+        doubt = doubt
+      else
+        if(@mission.vote_fail_count == 4) #always vote for a plan if it's critical
+          doubt = doubt
+        else
+          doubt = doubt + 1 if (RejectionStrategy.execute({strategy: @game.team_rejection_criteria, number_of_spies: number_of_spies, team: @team, number_of_players: @game.number_of_players}))
         end
       end
     end
     !(doubt > 2)
+  end
+end
+
+class RejectionStrategy
+  def self.execute(options)
+    if(options[:strategy]=='low_average_rep')
+      average_rep = options[:team].inject(0){|sum, n| sum + n.reputation}/options[:number_of_players]
+      average_rep > AVERAGE_REP_THRESHOLD
+    elsif(options[:strategy]=='low_rep_individual')
+
+      min_rep = options[:team].map(&:reputation).min
+
+      min_rep > LOWEST_REP_THRESHOLD
+    elsif(options[:strategy]=="omnipotent")
+      options[:number_of_spies]>0 #if resistance knew who spies were
+    end
   end
 end
 
@@ -166,12 +248,11 @@ class Mission
   end
 
   def print
-    puts "Mission #{@number}: \n team size: #{@team_size}\n status: #{@status}\n\n"
+    puts "Mission #{@number}: \n team size: #{@team_size}\n status: #{@status}\n\n" if NOISY
   end
 
   def start
-    puts "Leader is player ##{game.leader_number}"
-    puts "Mission ##{@number}"
+    puts "\nMission ##{@number}" if NOISY
     @status = "started"
     @mission_team = MissionTeam.new(self, @game)
     if(@mission_team.mission_team_approved)
@@ -184,7 +265,7 @@ class Mission
   def abort_mission
     @game.new_leader
     @vote_fail_count += 1
-    puts "aborted the mission... that makes #{@vote_fail_count}"
+    puts "aborted the mission... that makes #{@vote_fail_count}" if NOISY
     if @vote_fail_count > 4
       @vote_fail_count = 0
       fail_mission
@@ -201,7 +282,7 @@ class Mission
     team = @mission_team.team
     number_of_spies = team.count{|m| m.status == "spy" }
     spies_have_cover = number_of_spies < team.size
-    puts "number of spies is #{number_of_spies}"
+    puts "number of spies is #{number_of_spies}" if NOISY
     if(number_of_spies > 0)
       if @game.failed_missions_count==2 #win if possible
         true
@@ -218,56 +299,105 @@ class Mission
   end
 
   def end_mission(failure=true)
+    puts "mission team was #{@mission_team.team}" if NOISY
     failure ? fail_mission : complete_mission
     @game.new_leader
   end
 
   def fail_mission
-    puts "Mission ##{@number} failed!"
+    @mission_team.team.each do |p|
+      p.failed_mission
+    end
+    @game.leader.failed_as_leader
+
+    puts "Mission ##{@number} failed!" if NOISY
     @status = "failed"
   end
 
   def complete_mission
-    puts "Mission ##{@number} succeeded!"
+    @mission_team.team.each do |p|
+      p.successful_mission
+    end
+    @game.leader.succeeded_as_leader
+
+    puts "Mission ##{@number} succeeded!" if NOISY
     @status = "successful"
   end
 
 end
 
 class Player
-  attr_accessor :status, :number, :name, :reputation, :evidence
-  def initialize(number, status)
+  attr_accessor :status, :number, :name, :reputation, :game
+  def initialize(number, status, game)
     @status = status
     @number = number
     @name = "Player #{number}"
-    @reputation = 0
-    @evidence = []
+    @game = game
+    @reputation = BIAS_VALUE
   end
 
   def print
-    puts "Player #{@number}\n status: #{@status} "
+    puts "Player #{@number}\n status: #{@status} " if NOISY
   end
-  def is_spy
+
+  def is_spy?
     @status == "spy"
   end
-  def evaluate(player)
-    puts "evaluating player #{player.name}"
+
+  def is_leader?
+    self == @game.leader
+  end
+
+  def successful_mission
+    @reputation = ReputationCalculator.successful_mission(@reputation)
+  end
+  def failed_mission
+    @reputation = ReputationCalculator.failed_mission(@reputation)
+  end
+  def succeeded_as_leader
+    @reputation = ReputationCalculator.succeeded_as_leader(@reputation)
+  end
+  def failed_as_leader
+    @reputation = ReputationCalculator.failed_as_leader(@reputation)
+  end
+
+
+end
+
+class ReputationCalculator
+  def self.successful_mission(rep)
+    rep + SUCCESSFUL_MISSION
+  end
+  def self.failed_mission(rep)
+    rep + FAILED_MISSION
+  end
+  def self.succeeded_as_leader(rep)
+    rep + SUCCEEDED_AS_LEADER
+  end
+  def self.failed_as_leader(rep)
+    rep + FAILED_AS_LEADER
   end
 end
 
 
-games = []
-20.times do |x|
+game_results = []
+NUMBER_OF_TRIALS.times do
   game = Game.new
-  #game.print
-  #game.status
 
   5.times do
-    #game.status
     game.start_mission
     break if game.check_for_winner
   end
   game.final_report
-  #game.short_report
-  games.push(game)
+  game_results.push(game.winner[0])
 end
+resistance_wins = game_results.count{|e| e=='r'}
+puts resistance_wins*100.0/NUMBER_OF_TRIALS
+puts "BIAS_VALUE was #{BIAS_VALUE}"
+puts "SUCCESSFUL_MISSION was #{SUCCESSFUL_MISSION}"
+puts "FAILED_MISSION was #{FAILED_MISSION}"
+puts "SUCCEEDED_AS_LEADER was #{SUCCEEDED_AS_LEADER}"
+puts "FAILED_AS_LEADER was #{FAILED_AS_LEADER}"
+puts "AVERAGE_REP_THRESHOLD was #{AVERAGE_REP_THRESHOLD}"
+puts "LOWEST_REP_THRESHOLD was #{LOWEST_REP_THRESHOLD}"
+
